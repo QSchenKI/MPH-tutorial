@@ -118,6 +118,6 @@ This material is provided for educational purposes.
 ## Contact
 
 Qiao Sen Chen
-Department of Medical Epidemiology and Biostatistics
+Department of Medicine, Solna
 Karolinska Institutet
-Email: qiaosen.chen@ki.se
+Email: chen.qiaosen@ki.se
