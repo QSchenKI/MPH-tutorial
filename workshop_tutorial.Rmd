@@ -1,0 +1,1914 @@
+---
+title: "Workshop: The First Steps After Receiving a Dataset"
+subtitle: "From Raw Data to Analysis-Ready Dataset"
+author: "Qiao Sen Chen, PhD Student, MEB, Karolinska Institutet"
+date: "February 5, 2026"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    number_sections: yes
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+# Define project paths (relative to project root)
+# These follow best practices for reproducible research
+PATHS <- list(
+  raw_data = "data/raw",
+  processed_data = "data/processed",
+  scripts = "scripts",
+  docs = "docs",
+  output = "output"
+)
+```
+
+# Workshop Overview {.unnumbered}
+
+**Duration:** 3 hours (13:00-16:00)
+
+**Learning Objectives:**
+
+By the end of this workshop, you will be able to:
+
+1. Define and operationalize outcomes, exposures, and covariates
+2. Draft a basic statistical analysis plan (SAP)
+3. Perform data cleaning and quality control checks
+4. Conduct exploratory data analysis (EDA)
+5. Handle missing data appropriately
+6. Prepare an analysis-ready dataset
+7. Fit and interpret logistic regression models
+8. Conduct survival analysis using Cox proportional hazards regression
+9. Write up results for a cohort study manuscript
+
+**Schedule:**
+
+| Time | Topic |
+|------|-------|
+| 13:00-13:10 | Introduction & Setup |
+| 13:10-13:30 | Defining Outcomes/Exposures/Covariates |
+| 13:30-13:50 | Drafting a Statistical Analysis Plan |
+| 13:50-14:00 | **Break** |
+| 14:00-14:30 | Data Cleaning and Quality Control |
+| 14:30-14:50 | Exploratory Data Analysis |
+| 14:50-15:00 | **Break** |
+| 15:00-15:20 | Missing Data, Recoding & Final Preparation |
+| 15:20-15:50 | Statistical Analysis: Logistic & Survival Models |
+| 15:50-16:00 | Q&A and Wrap-up |
+
+***
+
+# Introduction and Setup
+
+## Required Packages
+
+Let's start by loading the packages we'll use throughout this workshop.
+
+```{r load-packages}
+# Core tidyverse packages
+library(tidyverse)    # Data manipulation and visualization
+
+# Data exploration and summary
+library(skimr)        # Comprehensive data summaries
+
+# Missing data
+library(naniar)       # Missing data visualization
+library(mice)         # Multiple imputation
+
+# Tables
+library(gtsummary)    # Publication-ready tables
+
+# Plot arrangement
+library(patchwork)    # Combine multiple plots
+
+# Survival analysis and model summaries
+library(survival)     # Core survival analysis
+library(survminer)    # Kaplan-Meier plots
+library(broom)        # Tidy model outputs
+
+# Install packages if needed (uncomment and run once)
+# install.packages(c("tidyverse", "skimr", "naniar", "mice",
+#                    "gtsummary", "patchwork", "broom",
+#                    "survival", "survminer"))
+```
+
+## Our Simulated Dataset: The CARDIAC Study
+
+For this workshop, we'll work with a **simulated cohort study** examining risk factors for cardiovascular disease (CVD) events. This dataset mimics real-world registry data you might receive from sources like the Swedish National Patient Register.
+
+**Study Design:** Prospective cohort study
+**Population:** Adults aged 40-80 years
+**Sample Size:** 2,000 participants
+**Follow-up:** Up to 10 years
+**Primary Outcome:** First cardiovascular event (MI, stroke, or CVD death)
+
+> **Note on Project Structure:** This tutorial is part of a project with organized folders:
+> - `data/raw/` - Raw data (never modified)
+> - `data/processed/` - Cleaned data
+> - `scripts/` - Standalone R scripts
+> - `docs/` - Documentation
+> - `output/` - Figures and tables
+
+```{r generate-data}
+# OPTION 1: Load pre-generated data (if you ran scripts/00_generate_data.R)
+# cardiac_raw <- readRDS(file.path(PATHS$raw_data, "cardiac_raw_data.rds"))
+
+# OPTION 2: Generate data inline (used for this tutorial)
+# Set seed for reproducibility
+set.seed(2026)
+
+n <- 2000
+
+# Generate the simulated CARDIAC dataset
+cardiac_raw <- tibble(
+  # Identifiers
+  patient_id = paste0("P", sprintf("%04d", 1:n)),
+
+  # Demographics
+  age = round(rnorm(n, mean = 58, sd = 10)),
+  sex = sample(c("Male", "Female", "M", "F", "1", "2", NA), n,
+               replace = TRUE, prob = c(0.30, 0.30, 0.10, 0.10, 0.08, 0.08, 0.04)),
+  education = sample(c("Primary", "Secondary", "University", "Unknown", NA), n,
+                     replace = TRUE, prob = c(0.15, 0.40, 0.35, 0.05, 0.05)),
+
+  # Clinical measurements (with some issues)
+  sbp = round(rnorm(n, mean = 135, sd = 20)),       # Systolic BP
+  dbp = round(rnorm(n, mean = 82, sd = 12)),        # Diastolic BP
+  bmi = round(rnorm(n, mean = 27, sd = 5), 1),
+  cholesterol_total = round(rnorm(n, mean = 5.5, sd = 1.2), 1),
+  hdl = round(rnorm(n, mean = 1.4, sd = 0.4), 1),
+  ldl = round(rnorm(n, mean = 3.4, sd = 1.0), 1),
+  glucose_fasting = round(rnorm(n, mean = 5.8, sd = 1.5), 1),
+
+  # Lifestyle factors
+  smoking_status = sample(c("Never", "Former", "Current", "never",
+                           "former", "current", "Unknown", NA), n,
+                         replace = TRUE, prob = c(0.25, 0.20, 0.15, 0.10,
+                                                  0.08, 0.07, 0.05, 0.10)),
+  alcohol_units_week = round(pmax(0, rnorm(n, mean = 8, sd = 8))),
+  physical_activity = sample(c("Low", "Moderate", "High", "low",
+                               "moderate", "high", NA), n,
+                            replace = TRUE, prob = c(0.15, 0.20, 0.15,
+                                                     0.15, 0.15, 0.10, 0.10)),
+
+  # Medical history (0/1 coding with some inconsistencies)
+  diabetes = sample(c(0, 1, "Yes", "No", NA), n,
+                   replace = TRUE, prob = c(0.40, 0.20, 0.15, 0.15, 0.10)),
+  hypertension = sample(c(0, 1, "Yes", "No", NA), n,
+                       replace = TRUE, prob = c(0.30, 0.30, 0.15, 0.15, 0.10)),
+  family_history_cvd = sample(c(0, 1, NA), n,
+                              replace = TRUE, prob = c(0.50, 0.35, 0.15)),
+
+  # Medications
+  statin_use = sample(c(0, 1, NA), n, replace = TRUE, prob = c(0.60, 0.30, 0.10)),
+  antihypertensive_use = sample(c(0, 1, NA), n,
+                                replace = TRUE, prob = c(0.55, 0.35, 0.10)),
+
+  # Dates
+  enrollment_date = as.Date("2010-01-01") + sample(0:1825, n, replace = TRUE),
+
+  # Placeholder columns for outcome and follow-up (will be replaced below)
+  cvd_event = NA_integer_,
+  follow_up_years = NA_real_
+)
+
+# Generate CVD events dependent on covariates (realistic associations)
+# First, clean key variables temporarily for outcome generation
+sex_clean <- case_when(
+  cardiac_raw$sex %in% c("Male", "M", "1") ~ "Male",
+  cardiac_raw$sex %in% c("Female", "F", "2") ~ "Female",
+  TRUE ~ sample(c("Male", "Female"), 1)
+)
+pa_clean <- case_when(
+  tolower(cardiac_raw$physical_activity) == "low" ~ "Low",
+  tolower(cardiac_raw$physical_activity) == "moderate" ~ "Moderate",
+  tolower(cardiac_raw$physical_activity) == "high" ~ "High",
+  TRUE ~ sample(c("Low", "Moderate", "High"), 1)
+)
+smoking_clean <- case_when(
+  tolower(cardiac_raw$smoking_status) %in% c("never") ~ "Never",
+  tolower(cardiac_raw$smoking_status) %in% c("former") ~ "Former",
+  tolower(cardiac_raw$smoking_status) %in% c("current") ~ "Current",
+  TRUE ~ sample(c("Never", "Former", "Current"), 1)
+)
+diabetes_clean <- case_when(
+  cardiac_raw$diabetes %in% c("1", "Yes") ~ 1,
+  cardiac_raw$diabetes %in% c("0", "No") ~ 0,
+  TRUE ~ 0
+)
+hypertension_clean <- case_when(
+  cardiac_raw$hypertension %in% c("1", "Yes") ~ 1,
+  cardiac_raw$hypertension %in% c("0", "No") ~ 0,
+  TRUE ~ 0
+)
+
+# Create linear predictor based on realistic epidemiological relationships
+log_odds <- -2.5 +
+  0.03 * (cardiac_raw$age - 58) +
+  ifelse(sex_clean == "Male", 0.3, 0) +
+  ifelse(pa_clean == "Moderate", -0.3,
+         ifelse(pa_clean == "High", -0.5, 0)) +
+  ifelse(smoking_clean == "Current", 0.4,
+         ifelse(smoking_clean == "Former", 0.15, 0)) +
+  0.02 * (cardiac_raw$bmi - 27) +
+  ifelse(diabetes_clean == 1, 0.4, 0) +
+  ifelse(hypertension_clean == 1, 0.3, 0)
+prob_cvd <- plogis(log_odds)
+cardiac_raw$cvd_event <- rbinom(n, 1, prob_cvd)
+
+# Generate realistic follow-up times
+# Events: time-to-event (shorter); Non-events: censoring time (uniform)
+cardiac_raw$follow_up_years <- ifelse(
+  cardiac_raw$cvd_event == 1,
+  round(rexp(n, rate = 0.25) + 0.5, 2),
+  round(runif(n, 0.5, 10), 2)
+)
+cardiac_raw$follow_up_years <- pmin(cardiac_raw$follow_up_years, 10)
+
+# Add some realistic data quality issues
+cardiac_raw <- cardiac_raw %>%
+  mutate(
+    # Some impossible values - each row needs its own condition
+    age = case_when(
+      row_number() == 15 ~ 150,
+      row_number() == 234 ~ -5,
+      row_number() == 567 ~ 999,
+      TRUE ~ age
+    ),
+    sbp = case_when(
+      row_number() == 89 ~ 350L,
+      row_number() == 456 ~ 40L,
+      TRUE ~ sbp
+    ),
+    bmi = case_when(
+      row_number() == 123 ~ 5,
+      row_number() == 789 ~ 75,
+      TRUE ~ bmi
+    ),
+    # Some dates in the future
+    enrollment_date = case_when(
+      row_number() == 100 ~ as.Date("2030-01-01"),
+      row_number() == 200 ~ as.Date("2028-06-15"),
+      TRUE ~ enrollment_date
+    ),
+    # Duplicate IDs
+    patient_id = case_when(
+      row_number() == 500 ~ "P0001",
+      row_number() == 1000 ~ "P0002",
+      TRUE ~ patient_id
+    )
+  )
+
+# Display first few rows
+head(cardiac_raw, 10)
+```
+
+**Notice anything unusual?** This dataset has been intentionally created with common data quality issues you'll encounter in real-world data. Our job today is to identify and handle these issues systematically.
+
+***
+
+# Defining Outcomes, Exposures, and Covariates
+
+## Why This Matters
+
+Before touching any data, you need crystal-clear definitions of:
+
+- **Outcome (Y):** What you're trying to predict or explain
+- **Exposure (X):** The main variable of interest (risk factor, treatment, etc.)
+- **Covariates (Z):** Variables that might confound the exposure-outcome relationship
+
+> **Key Principle:** Your variable definitions should be driven by your **research question**, not by what's conveniently available in the data.
+
+## Framework for Variable Definition
+
+### Step 1: Start with Your Research Question
+
+Let's say our research question is:
+
+> *"Is physical activity associated with reduced risk of cardiovascular events in middle-aged and older adults?"*
+
+### Step 2: Operationalize Each Variable
+
+**Outcome: Cardiovascular Event**
+
+| Aspect | Definition |
+|--------|------------|
+| What | First occurrence of MI, stroke, or CVD death |
+| How measured | ICD codes from patient registers |
+| Time frame | Within follow-up period |
+| Variable in data | `cvd_event` (0 = no, 1 = yes) |
+| Type | Binary |
+
+**Exposure: Physical Activity**
+
+| Aspect | Definition |
+|--------|------------|
+| What | Self-reported leisure-time physical activity |
+| Categories | Low, Moderate, High |
+| Reference group | Low physical activity |
+| Variable in data | `physical_activity` |
+| Type | Categorical (ordinal) |
+
+**Covariates: Potential Confounders**
+
+Based on a **DAG (Directed Acyclic Graph)** or prior knowledge:
+
+```{r covariate-table}
+# Define our variable roles
+variable_definitions <- tribble(
+  ~Variable, ~Role, ~Type, ~Rationale,
+  "cvd_event", "Outcome", "Binary", "Primary endpoint",
+  "physical_activity", "Exposure", "Categorical", "Main predictor of interest",
+  "age", "Confounder", "Continuous", "Affects both PA and CVD risk",
+  "sex", "Confounder", "Binary", "Affects both PA and CVD risk",
+  "smoking_status", "Confounder", "Categorical", "Lifestyle factor, affects CVD",
+  "bmi", "Confounder/Mediator", "Continuous", "May confound or mediate PA-CVD",
+  "diabetes", "Confounder", "Binary", "Major CVD risk factor",
+  "hypertension", "Confounder", "Binary", "Major CVD risk factor",
+  "education", "Confounder", "Categorical", "SES proxy, affects PA and health",
+  "follow_up_years", "Time variable", "Continuous", "For survival analysis"
+)
+
+knitr::kable(variable_definitions, caption = "Variable Definitions for Analysis")
+```
+
+### Step 3: Consider What NOT to Include
+
+**Colliders:** Variables affected by both exposure and outcome (don't adjust for these!)
+
+**Mediators:** Variables on the causal pathway - adjusting for them may remove the effect you want to estimate
+
+**Instrumental Variables:** Only affect outcome through the exposure
+
+## Exercise 1: Variable Definition (5 minutes) {.exercise}
+
+Suppose your research question changes to:
+*"Is statin use associated with reduced CVD risk?"*
+
+1. What is your **exposure**?
+2. What is your **outcome**?
+3. List 3-4 **potential confounders** from our dataset
+4. Is `ldl` (LDL cholesterol) a confounder or mediator? Why?
+
+```{r exercise1-solution, eval=FALSE, class.source = 'fold-hide'}
+# Solution Discussion:
+# Exposure: statin_use (binary: 0/1)
+# Outcome: cvd_event (binary: 0/1)
+#
+# Potential confounders:
+# - age (older people more likely to be on statins AND have CVD)
+# - diabetes (indication for statin use AND CVD risk factor)
+# - hypertension (often co-managed with statins AND CVD risk factor)
+# - baseline cholesterol (before statin initiation - indication for treatment)
+#
+# LDL is a MEDIATOR, not a confounder!
+# The causal pathway is: Statin use -> lower LDL -> lower CVD risk
+# Adjusting for LDL would "block" the effect we want to measure
+```
+
+***
+
+# Drafting a Statistical Analysis Plan (SAP)
+
+## What is a SAP?
+
+A **Statistical Analysis Plan** is a document that pre-specifies:
+
+- Your research question and hypotheses
+- Variable definitions and coding
+- Statistical methods
+- Handling of missing data
+- Sensitivity analyses
+
+> **Why pre-specify?** To avoid p-hacking, cherry-picking results, and post-hoc rationalization. It's increasingly required by journals and registers (e.g., ClinicalTrials.gov).
+
+## Key Components of a SAP
+
+### 1. Study Objectives and Hypotheses
+
+```
+PRIMARY OBJECTIVE:
+To assess the association between physical activity level and
+incident cardiovascular events.
+
+PRIMARY HYPOTHESIS:
+Compared to low physical activity, moderate and high physical
+activity are associated with lower risk of CVD events.
+```
+
+### 2. Study Population
+
+```
+INCLUSION CRITERIA:
+- Age 40-80 years at enrollment
+- No prior CVD event at baseline
+
+EXCLUSION CRITERIA:
+- Missing exposure (physical activity)
+- Missing outcome (cvd_event)
+- Follow-up time < 30 days
+```
+
+### 3. Sample Size Considerations
+
+```{r sample-size-notes, eval=FALSE}
+# For observational studies, report:
+# - Total N available
+# - N after exclusions
+# - Number of events (for outcome)
+# - Power considerations if relevant
+```
+
+### 4. Statistical Methods
+
+```
+PRIMARY ANALYSIS:
+Cox proportional hazards regression with time to first CVD event
+as the outcome and physical activity (3 levels) as the exposure,
+adjusted for age, sex, smoking status, BMI, diabetes, and hypertension.
+
+SECONDARY ANALYSES:
+1. Logistic regression (ignoring time-to-event)
+2. Stratified analyses by sex
+3. Sensitivity analysis with complete cases only
+```
+
+### 5. Missing Data Strategy
+
+```
+APPROACH:
+Multiple imputation using chained equations (MICE) under the
+missing at random (MAR) assumption for covariates with <20% missing.
+Variables with >20% missing will be excluded or imputed using
+missing indicator method in sensitivity analysis.
+```
+
+## Exercise 2: Draft a Mini-SAP (5 minutes) {.exercise}
+
+For the statin-CVD research question from Exercise 1:
+
+1. Write a one-sentence **primary hypothesis**
+2. List your **primary statistical method** (hint: what type of outcome is cvd_event?)
+3. Specify your **missing data approach**
+
+```{r exercise2-solution, eval=FALSE, class.source = 'fold-hide'}
+# Solution Discussion:
+#
+# 1. Primary hypothesis:
+#    "Statin use is associated with a reduced risk of incident
+#    cardiovascular events in adults aged 40-80 years."
+#
+# 2. Primary statistical method:
+#    Cox proportional hazards regression, because cvd_event is a
+#    binary outcome with variable follow-up time (time-to-event data).
+#    Alternatively, logistic regression if follow-up is similar across groups.
+#
+# 3. Missing data approach:
+#    Multiple imputation using chained equations (MICE) under the
+#    MAR assumption for covariates with <20% missing.
+#    Complete case analysis as a sensitivity analysis.
+```
+
+***
+
+# Data Cleaning and Quality Control
+
+## The Data Cleaning Workflow
+
+```
+Raw Data -> Inspection -> Validation -> Cleaning -> Documentation -> Clean Data
+```
+
+## Step 1: Initial Data Inspection
+
+### Get an Overview
+
+```{r inspect-overview}
+# Dimensions
+dim(cardiac_raw)
+
+# Structure
+glimpse(cardiac_raw)
+
+# Summary statistics
+summary(cardiac_raw)
+```
+
+### Using `skimr` for Comprehensive Summary
+
+```{r skim-data}
+skim(cardiac_raw)
+```
+
+**Things to look for:**
+
+- Missing values (`n_missing`, `complete_rate`)
+- Unexpected variable types (character vs numeric)
+- Suspicious min/max values
+- Number of unique values
+
+## Step 2: Check for Duplicates
+
+```{r check-duplicates}
+# Check for duplicate patient IDs
+cardiac_raw %>%
+  count(patient_id, sort = TRUE) %>%
+  filter(n > 1)
+
+# How many rows are duplicates?
+sum(duplicated(cardiac_raw$patient_id))
+```
+
+**Action:** We found 2 duplicate IDs. We need to investigate and decide how to handle them.
+
+```{r investigate-duplicates}
+# Look at the duplicate records
+cardiac_raw %>%
+  filter(patient_id %in% c("P0001", "P0002")) %>%
+  arrange(patient_id)
+```
+
+## Step 3: Validate Variable Ranges
+
+```{r range-validation}
+# Create validation rules
+validation_results <- cardiac_raw %>%
+  summarise(
+    # Age should be 40-80 per study design
+    age_invalid = sum(age < 0 | age > 120, na.rm = TRUE),
+    age_out_of_range = sum(age < 40 | age > 80, na.rm = TRUE),
+
+    # Blood pressure - physiologically plausible ranges
+    sbp_invalid = sum(sbp < 60 | sbp > 300, na.rm = TRUE),
+    dbp_invalid = sum(dbp < 30 | dbp > 200, na.rm = TRUE),
+
+    # BMI - plausible range
+    bmi_invalid = sum(bmi < 10 | bmi > 60, na.rm = TRUE),
+
+    # Dates - should not be in the future
+    future_dates = sum(enrollment_date > Sys.Date(), na.rm = TRUE)
+  )
+
+validation_results %>%
+  pivot_longer(everything(), names_to = "Check", values_to = "N_Invalid") %>%
+  knitr::kable(caption = "Data Validation Results")
+```
+
+## Step 4: Standardize Categorical Variables
+
+A common issue is inconsistent coding of categorical variables:
+
+```{r check-categories}
+# Check unique values in categorical variables
+cardiac_raw %>%
+  select(sex, smoking_status, physical_activity, diabetes, hypertension) %>%
+  map(~unique(.x)) %>%
+  map(~sort(.x))
+```
+
+**Problems identified:**
+
+- `sex`: Mixed formats ("Male", "M", "1", etc.)
+- `smoking_status`: Mixed case ("Never" vs "never")
+- `diabetes`/`hypertension`: Mixed numeric (0/1) and character ("Yes"/"No")
+
+## Step 5: Clean the Data
+
+Now let's systematically clean the dataset:
+
+```{r clean-data}
+cardiac_clean <- cardiac_raw %>%
+  # Step 1: Remove duplicate IDs (keep first occurrence)
+  distinct(patient_id, .keep_all = TRUE) %>%
+
+  # Step 2: Standardize sex
+  mutate(
+    sex = case_when(
+      sex %in% c("Male", "M", "1") ~ "Male",
+      sex %in% c("Female", "F", "2") ~ "Female",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+
+  # Step 3: Standardize smoking status
+  mutate(
+    smoking_status = case_when(
+      tolower(smoking_status) == "never" ~ "Never",
+      tolower(smoking_status) == "former" ~ "Former",
+      tolower(smoking_status) == "current" ~ "Current",
+      smoking_status == "Unknown" ~ NA_character_,
+      TRUE ~ NA_character_
+    )
+  ) %>%
+
+  # Step 4: Standardize physical activity
+  mutate(
+    physical_activity = case_when(
+      tolower(physical_activity) == "low" ~ "Low",
+      tolower(physical_activity) == "moderate" ~ "Moderate",
+      tolower(physical_activity) == "high" ~ "High",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+
+  # Step 5: Standardize binary medical history variables
+  mutate(
+    diabetes = case_when(
+      diabetes %in% c("1", "Yes") ~ 1,
+      diabetes %in% c("0", "No") ~ 0,
+      TRUE ~ NA_real_
+    ),
+    hypertension = case_when(
+      hypertension %in% c("1", "Yes") ~ 1,
+      hypertension %in% c("0", "No") ~ 0,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+
+  # Step 6: Handle impossible values (set to NA)
+  mutate(
+    age = if_else(age < 0 | age > 120, NA_real_, as.numeric(age)),
+    sbp = if_else(sbp < 60 | sbp > 300, NA_integer_, sbp),
+    dbp = if_else(dbp < 30 | dbp > 200, NA_integer_, dbp),
+    bmi = if_else(bmi < 10 | bmi > 60, NA_real_, bmi)
+  ) %>%
+
+  # Step 7: Handle future dates
+  mutate(
+    enrollment_date = if_else(enrollment_date > as.Date("2020-12-31"),
+                              NA_Date_, enrollment_date)
+  ) %>%
+
+  # Step 8: Convert categoricals to factors with proper levels
+  mutate(
+    sex = factor(sex, levels = c("Male", "Female")),
+    smoking_status = factor(smoking_status, levels = c("Never", "Former", "Current")),
+    physical_activity = factor(physical_activity, levels = c("Low", "Moderate", "High")),
+    education = factor(education, levels = c("Primary", "Secondary", "University"))
+  )
+
+# Check our cleaning worked
+glimpse(cardiac_clean)
+```
+
+## Step 6: Document the Cleaning Process
+
+**Always document what you did!**
+
+```{r document-cleaning}
+cleaning_log <- tribble(
+  ~Step, ~Action, ~N_Affected, ~Notes,
+  1, "Removed duplicate patient IDs", 2, "Kept first occurrence",
+  2, "Standardized sex variable", 0, "Recoded M/F/1/2 to Male/Female",
+  3, "Standardized smoking status", 0, "Harmonized case differences",
+  4, "Standardized physical activity", 0, "Harmonized case differences",
+  5, "Standardized diabetes/hypertension", 0, "Converted Yes/No to 1/0",
+  6, "Set impossible values to NA", 5, "age, sbp, bmi out of range",
+  7, "Set future dates to NA", 2, "Dates after 2020-12-31"
+)
+
+knitr::kable(cleaning_log, caption = "Data Cleaning Log")
+
+# Save cleaning log
+# write_csv(cleaning_log, file.path(PATHS$docs, "data_cleaning_log.csv"))
+```
+
+## Exercise 3: Data Cleaning Practice (10 minutes) {.exercise}
+
+1. Check the `education` variable - are there any issues?
+2. The `alcohol_units_week` variable might have outliers. How would you identify and handle extreme values?
+
+```{r exercise3-solution, eval=FALSE, class.source = 'fold-hide'}
+# 1. Check education
+cardiac_raw %>% count(education)
+# Issue: "Unknown" should probably be treated as NA
+
+# 2. Alcohol outliers - check distribution
+summary(cardiac_raw$alcohol_units_week)
+
+# Visual inspection
+ggplot(cardiac_raw, aes(x = alcohol_units_week)) +
+  geom_histogram(bins = 30) +
+  labs(title = "Distribution of Alcohol Consumption")
+
+# Options for handling outliers:
+# a) Set values > 99th percentile to NA
+# b) Winsorize (cap at a maximum reasonable value)
+# c) Keep but flag for sensitivity analysis
+
+# Example: Cap at 50 units/week (clinical reasonable maximum)
+cardiac_clean <- cardiac_clean %>%
+  mutate(
+    alcohol_units_week = if_else(alcohol_units_week > 50, 50, alcohol_units_week)
+  )
+```
+
+***
+
+# Exploratory Data Analysis (EDA)
+
+## Purpose of EDA
+
+- Understand distributions of your variables
+- Identify potential issues not caught in data cleaning
+- Explore relationships between variables
+- Generate hypotheses (but be careful about data dredging!)
+
+## Univariate Analysis
+
+### Continuous Variables
+
+```{r eda-continuous}
+# Summary statistics for continuous variables
+cardiac_clean %>%
+  select(age, sbp, dbp, bmi, cholesterol_total, hdl, ldl,
+         glucose_fasting, alcohol_units_week, follow_up_years) %>%
+  skim()
+```
+
+### Visualize Distributions
+
+```{r eda-histograms, fig.height=8}
+# Histograms for key continuous variables
+cardiac_clean %>%
+  select(age, sbp, bmi, cholesterol_total, glucose_fasting) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white", alpha = 0.7) +
+  facet_wrap(~variable, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Distribution of Continuous Variables")
+```
+
+### Categorical Variables
+
+```{r eda-categorical}
+# Frequency tables for categorical variables
+cardiac_clean %>%
+  select(sex, smoking_status, physical_activity, education) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  count(variable, value) %>%
+  group_by(variable) %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  knitr::kable(caption = "Frequency Distribution of Categorical Variables")
+```
+
+```{r eda-bar-plots, fig.height=6}
+# Bar plots
+p1 <- cardiac_clean %>%
+  count(sex) %>%
+  ggplot(aes(x = sex, y = n, fill = sex)) +
+  geom_col() +
+  theme_minimal() +
+  labs(title = "Sex Distribution")
+
+p2 <- cardiac_clean %>%
+  count(smoking_status) %>%
+  ggplot(aes(x = smoking_status, y = n, fill = smoking_status)) +
+  geom_col() +
+  theme_minimal() +
+  labs(title = "Smoking Status")
+
+p3 <- cardiac_clean %>%
+  count(physical_activity) %>%
+  ggplot(aes(x = physical_activity, y = n, fill = physical_activity)) +
+  geom_col() +
+  theme_minimal() +
+  labs(title = "Physical Activity")
+
+(p1 | p2) / p3
+```
+
+## Bivariate Analysis
+
+### Exposure vs Outcome
+
+```{r eda-exposure-outcome}
+# Cross-tabulation of physical activity and CVD events
+cardiac_clean %>%
+  filter(!is.na(physical_activity)) %>%
+  count(physical_activity, cvd_event) %>%
+  group_by(physical_activity) %>%
+  mutate(
+    total = sum(n),
+    pct = round(n / total * 100, 1)
+  ) %>%
+  filter(cvd_event == 1) %>%
+  select(physical_activity, n_events = n, total, event_rate_pct = pct) %>%
+  knitr::kable(caption = "CVD Events by Physical Activity Level")
+```
+
+```{r eda-bivariate-plot}
+# Visualize relationship
+cardiac_clean %>%
+  filter(!is.na(physical_activity)) %>%
+  group_by(physical_activity) %>%
+  summarise(
+    event_rate = mean(cvd_event, na.rm = TRUE),
+    se = sqrt(event_rate * (1 - event_rate) / n())
+  ) %>%
+  ggplot(aes(x = physical_activity, y = event_rate, fill = physical_activity)) +
+  geom_col(alpha = 0.7) +
+  geom_errorbar(aes(ymin = event_rate - 1.96*se, ymax = event_rate + 1.96*se),
+                width = 0.2) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(
+    title = "CVD Event Rate by Physical Activity Level",
+    subtitle = "Error bars show 95% confidence intervals",
+    y = "Event Rate",
+    x = "Physical Activity Level"
+  )
+```
+
+### Continuous Variables by Outcome
+
+```{r eda-continuous-by-outcome}
+# Compare continuous variables between those with and without CVD events
+cardiac_clean %>%
+  select(cvd_event, age, sbp, bmi, cholesterol_total, glucose_fasting) %>%
+  group_by(cvd_event) %>%
+  skim() %>%
+  filter(skim_type == "numeric") %>%
+  select(cvd_event, skim_variable, numeric.mean, numeric.sd) %>%
+  pivot_wider(
+    names_from = cvd_event,
+    values_from = c(numeric.mean, numeric.sd),
+    names_prefix = "event_"
+  )
+```
+
+## Creating Table 1 (Baseline Characteristics)
+
+A **Table 1** is essential for any observational study manuscript:
+
+```{r table-one}
+# Using gtsummary
+table1 <- cardiac_clean %>%
+  select(
+    cvd_event, age, sex, smoking_status, physical_activity, education,
+    sbp, bmi, cholesterol_total, diabetes, hypertension
+  ) %>%
+  mutate(cvd_event = factor(cvd_event, levels = c(0, 1),
+                            labels = c("No CVD Event", "CVD Event"))) %>%
+  tbl_summary(
+    by = cvd_event,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 1,
+    label = list(
+      age ~ "Age (years)",
+      sex ~ "Sex",
+      smoking_status ~ "Smoking Status",
+      physical_activity ~ "Physical Activity",
+      education ~ "Education Level",
+      sbp ~ "Systolic BP (mmHg)",
+      bmi ~ "BMI (kg/m²)",
+      cholesterol_total ~ "Total Cholesterol (mmol/L)",
+      diabetes ~ "Diabetes",
+      hypertension ~ "Hypertension"
+    ),
+    missing = "ifany"
+  ) %>%
+  add_p() %>%
+  add_overall() %>%
+  bold_labels()
+
+table1
+```
+
+## Exercise 4: EDA Practice (10 minutes) {.exercise}
+
+1. Create a scatter plot of `age` vs `sbp`, colored by `cvd_event`
+2. Calculate the correlation between `sbp` and `dbp`
+3. What does the correlation tell you about these variables?
+
+```{r exercise4-solution, eval=FALSE, class.source = 'fold-hide'}
+# 1. Scatter plot
+ggplot(cardiac_clean, aes(x = age, y = sbp, color = factor(cvd_event))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "Age vs Systolic Blood Pressure by CVD Event",
+    color = "CVD Event"
+  )
+
+# 2. Correlation
+cor(cardiac_clean$sbp, cardiac_clean$dbp, use = "complete.obs")
+
+# 3. Interpretation:
+# The correlation is typically high (r > 0.6), which makes biological sense
+# as both reflect arterial pressure. This suggests potential multicollinearity
+# if both are included in a regression model - you might need to choose one
+# or combine them (e.g., mean arterial pressure).
+```
+
+***
+
+# Handling Missing Data
+
+## Understanding Missing Data Mechanisms
+
+| Mechanism | Definition | Example | Impact |
+|-----------|------------|---------|--------|
+| **MCAR** | Missing Completely at Random | Lab sample accidentally dropped | Unbiased but reduced power |
+| **MAR** | Missing at Random (given observed data) | Older patients less likely to have recent BP | Biased if ignored, can impute |
+| **MNAR** | Missing Not at Random | Sicker patients miss follow-up | Biased even with imputation |
+
+## Assess Missing Data Patterns
+
+```{r missing-overview}
+# Overall missing data summary
+cardiac_clean %>%
+  miss_var_summary() %>%
+  filter(pct_miss > 0) %>%
+  knitr::kable(caption = "Variables with Missing Data", digits = 1)
+```
+
+```{r missing-visualization, fig.height=4}
+# Visualize missing data patterns
+vis_miss(cardiac_clean, sort_miss = TRUE)
+```
+
+```{r missing-upset, fig.height=6}
+# Missing data patterns (co-occurrence)
+gg_miss_upset(cardiac_clean, nsets = 6)
+```
+
+## Is Missingness Related to Other Variables?
+
+```{r missing-patterns}
+# Check if missingness in physical_activity is related to other variables
+cardiac_clean %>%
+  mutate(pa_missing = is.na(physical_activity)) %>%
+  group_by(pa_missing) %>%
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    prop_male = mean(sex == "Male", na.rm = TRUE),
+    prop_cvd = mean(cvd_event, na.rm = TRUE)
+  ) %>%
+  knitr::kable(caption = "Characteristics by Physical Activity Missingness", digits = 3)
+```
+
+## Handling Missing Data: Common Approaches
+
+### 1. Complete Case Analysis
+
+```{r complete-case}
+# Create complete case dataset
+cardiac_complete <- cardiac_clean %>%
+  drop_na(cvd_event, physical_activity, age, sex, smoking_status,
+          bmi, diabetes, hypertension)
+
+cat("Original N:", nrow(cardiac_clean), "\n")
+cat("Complete cases N:", nrow(cardiac_complete), "\n")
+cat("Proportion retained:", round(nrow(cardiac_complete)/nrow(cardiac_clean)*100, 1), "%\n")
+```
+
+**Problem:** We may lose a lot of data, and results may be biased if data is not MCAR.
+
+### 2. Multiple Imputation
+
+Multiple imputation is the gold standard for handling MAR data:
+
+```{r mice-imputation, cache=TRUE}
+# Select variables for imputation
+vars_to_impute <- c("age", "sex", "smoking_status", "physical_activity",
+                    "education", "sbp", "dbp", "bmi", "cholesterol_total",
+                    "diabetes", "hypertension", "cvd_event", "follow_up_years")
+
+cardiac_for_imp <- cardiac_clean %>%
+  select(patient_id, all_of(vars_to_impute))
+
+# Set up MICE (this may take a minute)
+# Using m=5 imputations for demonstration (use m=20+ in practice)
+set.seed(2026)
+imp <- mice(
+  cardiac_for_imp %>% select(-patient_id),
+  m = 5,          # Number of imputations
+  method = "pmm", # Predictive mean matching for continuous
+  maxit = 10,     # Number of iterations
+  printFlag = FALSE
+)
+
+# Check convergence
+plot(imp)
+```
+
+```{r mice-summary}
+# Summary of imputation
+summary(imp)
+
+# Get one imputed dataset (for exploration)
+cardiac_imputed <- complete(imp, action = 1)
+
+# Compare distributions before and after imputation
+cat("Physical Activity - Original:\n")
+table(cardiac_clean$physical_activity, useNA = "ifany")
+
+cat("\nPhysical Activity - After Imputation:\n")
+table(cardiac_imputed$physical_activity, useNA = "ifany")
+```
+
+> **Note for this workshop:** In a real analysis, you would run your regression models on each imputed dataset and pool the results using `mice::pool()`. For this workshop, we proceed with complete case analysis to keep the modeling sections straightforward. The MICE section above demonstrates the *technique* — applying it to the final models is a natural next step.
+
+## Exercise 5: Missing Data Assessment (10 minutes) {.exercise}
+
+1. Calculate the percentage of missing data for the `education` variable
+2. Check if missingness in `education` is related to `age` or `sex`
+3. What mechanism (MCAR, MAR, MNAR) do you suspect? Why?
+
+```{r exercise5-solution, eval=FALSE, class.source = 'fold-hide'}
+# 1. Missing percentage
+mean(is.na(cardiac_clean$education)) * 100
+
+# 2. Relationship with other variables
+cardiac_clean %>%
+  mutate(edu_missing = is.na(education)) %>%
+  group_by(edu_missing) %>%
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    prop_male = mean(sex == "Male", na.rm = TRUE),
+    n = n()
+  )
+
+# 3. Interpretation:
+# If missing education is associated with age/sex, it suggests MAR
+# (missingness can be predicted from observed variables)
+# If there's no association, it might be MCAR
+# MNAR would be if people with lower education are less likely to report it
+# (which we can't test directly from the data)
+```
+
+***
+# Recoding Variables and Preparing the Analysis Dataset
+
+## Common Recoding Tasks
+
+### Create Binary Variables from Continuous
+
+```{r recode-binary}
+cardiac_analysis <- cardiac_clean %>%
+  mutate(
+    # Create obesity indicator (example of dichotomizing a continuous variable)
+    obese = as.integer(bmi >= 30)
+  )
+
+# Check the new variable
+cardiac_analysis %>%
+  count(obese)
+```
+
+### Create Categorical from Continuous
+
+```{r recode-categorical}
+cardiac_analysis <- cardiac_analysis %>%
+  mutate(
+    # BMI categories
+    bmi_category = case_when(
+      bmi < 18.5 ~ "Underweight",
+      bmi < 25 ~ "Normal",
+      bmi < 30 ~ "Overweight",
+      bmi >= 30 ~ "Obese",
+      TRUE ~ NA_character_
+    ),
+    bmi_category = factor(bmi_category,
+                          levels = c("Underweight", "Normal", "Overweight", "Obese")),
+
+    # Age categories (10-year bands)
+    age_category = cut(age,
+                       breaks = c(40, 50, 60, 70, 80),
+                       labels = c("40-49", "50-59", "60-69", "70-80"),
+                       include.lowest = TRUE, right = FALSE)
+  )
+
+# Check
+table(cardiac_analysis$bmi_category, useNA = "ifany")
+```
+
+## Apply Inclusion/Exclusion Criteria
+
+```{r apply-criteria}
+# Document sample selection
+cat("=== Sample Selection ===\n\n")
+
+n_start <- nrow(cardiac_analysis)
+cat("Starting sample:", n_start, "\n")
+
+# Exclusion 1: Age out of range
+cardiac_analysis <- cardiac_analysis %>%
+  filter(age >= 40 & age <= 80)
+cat("After age 40-80:", nrow(cardiac_analysis),
+    "(excluded", n_start - nrow(cardiac_analysis), ")\n")
+n_after_age <- nrow(cardiac_analysis)
+
+# Exclusion 2: Missing primary exposure
+cardiac_analysis <- cardiac_analysis %>%
+  filter(!is.na(physical_activity))
+cat("After excluding missing exposure:", nrow(cardiac_analysis),
+    "(excluded", n_after_age - nrow(cardiac_analysis), ")\n")
+n_after_exposure <- nrow(cardiac_analysis)
+
+# Exclusion 3: Missing outcome
+cardiac_analysis <- cardiac_analysis %>%
+  filter(!is.na(cvd_event))
+cat("After excluding missing outcome:", nrow(cardiac_analysis),
+    "(excluded", n_after_exposure - nrow(cardiac_analysis), ")\n")
+
+# Final sample
+cat("\nFinal analytic sample:", nrow(cardiac_analysis), "\n")
+```
+
+## Create the Final Analysis Dataset
+
+```{r final-dataset}
+# Select and order variables for final analysis dataset
+cardiac_final <- cardiac_analysis %>%
+  select(
+    # ID
+    patient_id,
+
+    # Outcome
+    cvd_event,
+    follow_up_years,
+
+    # Exposure
+    physical_activity,
+
+    # Key confounders
+    age,
+    age_category,
+    sex,
+    smoking_status,
+    education,
+
+    # Clinical measures
+    sbp,
+    dbp,
+    bmi,
+    bmi_category,
+    cholesterol_total,
+    ldl,
+    hdl,
+    glucose_fasting,
+
+    # Medical history
+    diabetes,
+    hypertension,
+    family_history_cvd,
+
+    # Medications
+    statin_use,
+    antihypertensive_use,
+
+    # Dates
+    enrollment_date
+  )
+
+# Final check
+glimpse(cardiac_final)
+```
+
+## Document the Analysis Dataset
+
+```{r data-dictionary}
+# Create a data dictionary
+data_dictionary <- tibble(
+  Variable = names(cardiac_final),
+  Type = sapply(cardiac_final, function(x) class(x)[1]),
+  N_Missing = sapply(cardiac_final, function(x) sum(is.na(x))),
+  Pct_Missing = round(sapply(cardiac_final, function(x) mean(is.na(x)) * 100), 1),
+  Description = c(
+    "Unique patient identifier",
+    "Primary outcome: CVD event (1=yes, 0=no)",
+    "Follow-up time in years",
+    "Primary exposure: Physical activity level",
+    "Age at enrollment (years)",
+    "Age category (10-year bands)",
+    "Sex (Male/Female)",
+    "Smoking status",
+    "Education level",
+    "Systolic blood pressure (mmHg)",
+    "Diastolic blood pressure (mmHg)",
+    "Body mass index (kg/m²)",
+    "BMI category",
+    "Total cholesterol (mmol/L)",
+    "LDL cholesterol (mmol/L)",
+    "HDL cholesterol (mmol/L)",
+    "Fasting glucose (mmol/L)",
+    "Diabetes (1=yes, 0=no)",
+    "Hypertension (1=yes, 0=no)",
+    "Family history of CVD (1=yes, 0=no)",
+    "Statin use (1=yes, 0=no)",
+    "Antihypertensive use (1=yes, 0=no)",
+    "Date of enrollment"
+  )
+)
+
+knitr::kable(data_dictionary, caption = "Data Dictionary for Analysis Dataset")
+```
+
+## Save the Analysis Dataset
+
+```{r save-data, eval=FALSE}
+# Create directories if they don't exist
+if (!dir.exists(PATHS$processed_data)) dir.create(PATHS$processed_data, recursive = TRUE)
+if (!dir.exists(PATHS$docs)) dir.create(PATHS$docs, recursive = TRUE)
+
+# Save as RDS (preserves R data types) - to processed data folder
+saveRDS(cardiac_final, file.path(PATHS$processed_data, "cardiac_analysis.rds"))
+
+# Save as CSV (for sharing with other software)
+write_csv(cardiac_final, file.path(PATHS$processed_data, "cardiac_analysis.csv"))
+
+# Save the data dictionary to docs folder
+write_csv(data_dictionary, file.path(PATHS$docs, "data_dictionary.csv"))
+
+cat("Analysis dataset saved successfully!\n")
+cat("Location:", PATHS$processed_data, "\n")
+cat("  - cardiac_analysis.rds\n")
+cat("  - cardiac_analysis.csv\n")
+cat("\nData dictionary saved to:", PATHS$docs, "\n")
+```
+
+***
+
+# Statistical Analysis: From Data to Inference
+
+Now that we have a clean, well-documented analysis dataset, we can proceed with hypothesis testing. In this section, we'll conduct both **logistic regression** and **survival analysis** to address our research question:
+
+> *"Is physical activity associated with reduced risk of cardiovascular events in middle-aged and older adults?"*
+
+## Descriptive Statistics: Outcome by Exposure
+
+Before modeling, let's examine the relationship between physical activity and CVD events.
+
+```{r descriptive-outcome}
+# Event rates by physical activity level
+event_summary <- cardiac_final %>%
+  group_by(physical_activity) %>%
+  summarise(
+    N = n(),
+    Events = sum(cvd_event),
+    `Person-Years` = round(sum(follow_up_years), 1),
+    `Event Rate (%)` = round(mean(cvd_event) * 100, 1),
+    `Incidence Rate (per 1000 PY)` = round(Events / sum(follow_up_years) * 1000, 1),
+    `Mean Follow-up (years)` = round(mean(follow_up_years), 2)
+  ) %>%
+  ungroup()
+
+knitr::kable(event_summary,
+             caption = "CVD Events by Physical Activity Level",
+             align = "lcccccc")
+```
+
+**Observation:** We can see the crude event rates across physical activity levels. Lower event rates in the higher activity groups would suggest a protective association.
+
+***
+
+## Part 1: Logistic Regression Analysis
+
+Logistic regression models the **probability** of an event occurring. While it doesn't account for time-to-event, it's commonly used in cohort studies when follow-up time is relatively uniform.
+
+### 1.1 Unadjusted (Crude) Model
+
+```{r logistic-unadjusted}
+# Fit unadjusted logistic regression
+model_logit_crude <- glm(
+  cvd_event ~ physical_activity,
+  data = cardiac_final,
+  family = binomial(link = "logit")
+)
+
+# Summary
+summary(model_logit_crude)
+```
+
+```{r logistic-unadjusted-or}
+# Extract odds ratios with 95% CI
+crude_or <- model_logit_crude %>%
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(physical_activity ~ "Physical Activity")
+  ) %>%
+  bold_p() %>%
+  add_global_p()
+
+crude_or
+```
+
+### 1.2 Adjusted Model
+
+We adjust for potential confounders identified in our DAG/SAP:
+
+- **Age** (continuous)
+- **Sex** (binary)
+- **Smoking status** (categorical)
+- **BMI** (continuous)
+- **Diabetes** (binary)
+- **Hypertension** (binary)
+- **Education** (categorical, proxy for SES)
+
+```{r logistic-adjusted}
+# Fit adjusted logistic regression
+model_logit_adj <- glm(
+  cvd_event ~ physical_activity + age + sex + smoking_status +
+              bmi + diabetes + hypertension + education,
+  data = cardiac_final,
+  family = binomial(link = "logit")
+)
+
+# Summary
+summary(model_logit_adj)
+```
+
+```{r logistic-adjusted-table}
+# Publication-ready table with odds ratios
+adj_or <- model_logit_adj %>%
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      physical_activity ~ "Physical Activity",
+      age ~ "Age (per year)",
+      sex ~ "Sex",
+      smoking_status ~ "Smoking Status",
+      bmi ~ "BMI (per kg/m²)",
+      diabetes ~ "Diabetes",
+      hypertension ~ "Hypertension",
+      education ~ "Education"
+    )
+  ) %>%
+  bold_p() %>%
+  add_global_p()
+
+adj_or
+```
+
+### 1.3 Compare Crude vs Adjusted Results
+
+```{r compare-logistic}
+# Side-by-side comparison
+tbl_merge(
+  tbls = list(crude_or, adj_or),
+  tab_spanner = c("**Unadjusted**", "**Adjusted**")
+)
+```
+
+### 1.4 Model Diagnostics
+
+```{r logistic-diagnostics}
+# Hosmer-Lemeshow goodness-of-fit test (requires ResourceSelection package)
+# install.packages("ResourceSelection")
+# library(ResourceSelection)
+# hoslem.test(model_logit_adj$y, fitted(model_logit_adj), g = 10)
+
+# Check for influential observations using Cook's distance
+plot(model_logit_adj, which = 4, main = "Cook's Distance")
+
+# Pseudo R-squared (McFadden)
+null_model <- glm(cvd_event ~ 1, data = cardiac_final, family = binomial)
+mcfadden_r2 <- 1 - (logLik(model_logit_adj) / logLik(null_model))
+cat("McFadden's Pseudo R²:", round(as.numeric(mcfadden_r2), 4), "\n")
+
+# AIC comparison
+cat("AIC (Crude model):", round(AIC(model_logit_crude), 1), "\n")
+cat("AIC (Adjusted model):", round(AIC(model_logit_adj), 1), "\n")
+```
+
+### 1.5 Interpretation: Logistic Regression Results
+
+```{r logistic-interpretation}
+# Extract key results for interpretation
+logit_results <- tidy(model_logit_adj, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(str_detect(term, "physical_activity"))
+
+# Display
+logit_results %>%
+  select(term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~round(., 2)),
+         p.value = format.pval(p.value, digits = 3)) %>%
+  knitr::kable(col.names = c("Term", "OR", "95% CI Lower", "95% CI Upper", "P-value"),
+               caption = "Odds Ratios for Physical Activity (Reference: Low)")
+```
+
+#### **Interpretation of Logistic Regression:**
+
+> **Context:** In this prospective cohort study of `r nrow(cardiac_final)` adults aged 40-80 years, we examined the association between physical activity and cardiovascular disease (CVD) events.
+
+> **Main Finding:** After adjusting for age, sex, smoking status, BMI, diabetes, hypertension, and education:
+
+> - Participants with **moderate physical activity** had an odds ratio (OR) of `r round(logit_results$estimate[1], 2)` (95% CI: `r round(logit_results$conf.low[1], 2)`-`r round(logit_results$conf.high[1], 2)`) for CVD events compared to those with low physical activity.
+
+> - Participants with **high physical activity** had an OR of `r round(logit_results$estimate[2], 2)` (95% CI: `r round(logit_results$conf.low[2], 2)`-`r round(logit_results$conf.high[2], 2)`) compared to those with low physical activity.
+
+> **Clinical Interpretation:** An OR < 1 suggests a protective effect of physical activity against CVD events. The magnitude of the OR indicates how much the odds of CVD are reduced for each activity level compared to the reference group.
+
+***
+
+## Part 2: Survival Analysis (Time-to-Event)
+
+Survival analysis is the **preferred method** for cohort studies because it:
+
+1. Accounts for **variable follow-up time**
+2. Handles **censoring** (participants lost to follow-up)
+3. Provides **hazard ratios** (rate ratios) rather than odds ratios
+
+### 2.1 Create Survival Object
+
+```{r survival-object}
+# Create survival object
+# Surv(time, event) where event = 1 means the event occurred
+cardiac_surv <- cardiac_final %>%
+  filter(!is.na(physical_activity)) %>%  # Ensure complete exposure data
+  mutate(
+    # Ensure proper numeric coding
+    event = as.numeric(cvd_event),
+    time = follow_up_years
+  )
+
+# Create the survival object
+surv_obj <- Surv(time = cardiac_surv$time, event = cardiac_surv$event)
+
+# Summary
+summary(surv_obj)
+```
+
+### 2.2 Kaplan-Meier Survival Curves
+
+```{r kaplan-meier, fig.height=7}
+# Fit Kaplan-Meier curves by physical activity
+km_fit <- survfit(surv_obj ~ physical_activity, data = cardiac_surv)
+
+# Summary statistics
+km_summary <- summary(km_fit)
+
+# Print median survival and confidence intervals
+print(km_fit)
+```
+
+```{r km-plot, fig.height=7, fig.width=10}
+# Plot Kaplan-Meier curves
+ggsurvplot(
+  km_fit,
+  data = cardiac_surv,
+  pval = TRUE,                    # Log-rank test p-value
+  pval.method = TRUE,             # Show method name
+  conf.int = TRUE,                # Confidence intervals
+  risk.table = TRUE,              # Number at risk table
+  risk.table.col = "strata",
+  risk.table.height = 0.25,
+  xlab = "Time (Years)",
+  ylab = "CVD Event-Free Probability",
+  title = "Kaplan-Meier Curves: CVD-Free Survival by Physical Activity",
+  legend.title = "Physical Activity",
+  legend.labs = c("Low", "Moderate", "High"),
+  palette = c("#E41A1C", "#377EB8", "#4DAF4A"),  # Red, Blue, Green
+  ggtheme = theme_minimal(),
+  break.time.by = 2                # X-axis breaks
+)
+```
+
+**Log-Rank Test:** The p-value from the log-rank test indicates whether there is a statistically significant difference in survival curves between groups.
+
+### 2.3 Cox Proportional Hazards Model: Unadjusted
+
+```{r cox-unadjusted}
+# Fit unadjusted Cox model
+cox_crude <- coxph(
+  Surv(time, event) ~ physical_activity,
+  data = cardiac_surv
+)
+
+# Summary
+summary(cox_crude)
+```
+
+```{r cox-crude-table}
+# Hazard ratios with 95% CI
+cox_crude_tbl <- cox_crude %>%
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(physical_activity ~ "Physical Activity")
+  ) %>%
+  bold_p()
+
+cox_crude_tbl
+```
+
+### 2.4 Cox Proportional Hazards Model: Adjusted
+
+```{r cox-adjusted}
+# Fit adjusted Cox model
+cox_adj <- coxph(
+  Surv(time, event) ~ physical_activity + age + sex + smoking_status +
+                       bmi + diabetes + hypertension + education,
+  data = cardiac_surv
+)
+
+# Summary
+summary(cox_adj)
+```
+
+```{r cox-adjusted-table}
+# Publication-ready table
+cox_adj_tbl <- cox_adj %>%
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      physical_activity ~ "Physical Activity",
+      age ~ "Age (per year)",
+      sex ~ "Sex",
+      smoking_status ~ "Smoking Status",
+      bmi ~ "BMI (per kg/m²)",
+      diabetes ~ "Diabetes",
+      hypertension ~ "Hypertension",
+      education ~ "Education"
+    )
+  ) %>%
+  bold_p() %>%
+  add_global_p()
+
+cox_adj_tbl
+```
+
+### 2.5 Compare Crude vs Adjusted Hazard Ratios
+
+```{r compare-cox}
+# Side-by-side comparison of Cox models
+tbl_merge(
+  tbls = list(cox_crude_tbl, cox_adj_tbl),
+  tab_spanner = c("**Unadjusted HR**", "**Adjusted HR**")
+)
+```
+
+### 2.6 Proportional Hazards Assumption
+
+The Cox model assumes that hazard ratios are **constant over time**. We must test this assumption.
+
+```{r ph-assumption}
+# Test proportional hazards assumption
+ph_test <- cox.zph(cox_adj)
+
+# Print results
+print(ph_test)
+```
+
+```{r ph-plot, fig.height=8, fig.width=10}
+# Visual assessment of PH assumption
+# Schoenfeld residuals should show no trend over time
+plot(ph_test, var = "physical_activity")
+```
+
+**Interpretation of PH Test:**
+
+- **p > 0.05** for a variable: PH assumption is NOT violated (good!)
+- **p < 0.05** for a variable: PH assumption may be violated; consider stratification or time-varying coefficients
+- **GLOBAL test**: Overall test for all variables
+
+### 2.7 Model Diagnostics: Cox Regression
+
+```{r cox-diagnostics}
+# Concordance (C-statistic) - discrimination ability
+concordance <- summary(cox_adj)$concordance
+cat("Concordance (C-statistic):", round(concordance[1], 3),
+    "(SE:", round(concordance[2], 3), ")\n")
+
+# Likelihood ratio test
+cat("\nLikelihood Ratio Test:\n")
+cat("Chi-squared:", round(summary(cox_adj)$logtest[1], 2),
+    ", df:", summary(cox_adj)$logtest[2],
+    ", p-value:", format.pval(summary(cox_adj)$logtest[3], digits = 3), "\n")
+```
+
+```{r cox-forest-plot, fig.height=7, fig.width=9}
+# Create a custom forest plot using broom and ggplot2
+# (More robust than ggforest which can have compatibility issues)
+
+forest_data <- tidy(cox_adj, exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(
+    # Clean up term names for display
+    term_clean = case_when(
+      term == "physical_activityModerate" ~ "Physical Activity: Moderate vs Low",
+      term == "physical_activityHigh" ~ "Physical Activity: High vs Low",
+      term == "age" ~ "Age (per year)",
+      term == "sexFemale" ~ "Sex: Female vs Male",
+      term == "smoking_statusFormer" ~ "Smoking: Former vs Never",
+      term == "smoking_statusCurrent" ~ "Smoking: Current vs Never",
+      term == "bmi" ~ "BMI (per kg/m²)",
+      term == "diabetes" ~ "Diabetes: Yes vs No",
+      term == "hypertension" ~ "Hypertension: Yes vs No",
+      term == "educationSecondary" ~ "Education: Secondary vs Primary",
+      term == "educationUniversity" ~ "Education: University vs Primary",
+      TRUE ~ term
+    ),
+    # Create label with HR and CI
+    hr_label = sprintf("%.2f (%.2f-%.2f)", estimate, conf.low, conf.high),
+    # Create plot order column (row_number() must be used inside mutate)
+    plot_order = row_number()
+  )
+
+# Forest plot - use plot_order column instead of row_number() in aes
+ggplot(forest_data, aes(x = estimate, y = reorder(term_clean, plot_order))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "steelblue") +
+  geom_point(size = 3, color = "steelblue") +
+  scale_x_log10(breaks = c(0.5, 0.75, 1, 1.5, 2, 3)) +
+  labs(
+    title = "Forest Plot: Hazard Ratios for CVD Events",
+    subtitle = "Cox Proportional Hazards Model (Adjusted)",
+    x = "Hazard Ratio (95% CI, log scale)",
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.y = element_text(size = 10)
+  )
+```
+
+### 2.8 Interpretation: Survival Analysis Results
+
+```{r survival-interpretation}
+# Extract key results for interpretation
+cox_results <- tidy(cox_adj, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(str_detect(term, "physical_activity"))
+
+# Calculate person-years and incidence rates
+py_summary <- cardiac_surv %>%
+  group_by(physical_activity) %>%
+  summarise(
+    n = n(),
+    events = sum(event),
+    person_years = sum(time),
+    incidence_rate = events / person_years * 1000
+  )
+
+# Display
+cox_results %>%
+  select(term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~round(., 2)),
+         p.value = format.pval(p.value, digits = 3)) %>%
+  knitr::kable(col.names = c("Term", "HR", "95% CI Lower", "95% CI Upper", "P-value"),
+               caption = "Hazard Ratios for Physical Activity (Reference: Low)")
+```
+
+#### **Complete Interpretation of Survival Analysis:**
+
+> **Study Design:** This prospective cohort study followed `r nrow(cardiac_surv)` adults aged 40-80 years for up to 10 years to examine the association between physical activity level and incident cardiovascular disease (CVD) events.
+
+> **Follow-up:** Total follow-up was `r round(sum(cardiac_surv$time), 0)` person-years, with a mean follow-up of `r round(mean(cardiac_surv$time), 1)` years per participant. During this period, `r sum(cardiac_surv$event)` CVD events occurred.
+
+> **Main Findings:**
+
+> Using Cox proportional hazards regression adjusted for age, sex, smoking status, BMI, diabetes, hypertension, and education:
+
+> 1. **Moderate vs. Low Physical Activity:**
+>    - Hazard Ratio (HR): `r round(cox_results$estimate[1], 2)` (95% CI: `r round(cox_results$conf.low[1], 2)`-`r round(cox_results$conf.high[1], 2)`)
+>    - Interpretation: Participants with moderate physical activity had a `r abs(round((1 - cox_results$estimate[1]) * 100, 0))`% `r ifelse(cox_results$estimate[1] < 1, "lower", "higher")` rate of CVD events compared to those with low physical activity.
+
+> 2. **High vs. Low Physical Activity:**
+>    - Hazard Ratio (HR): `r round(cox_results$estimate[2], 2)` (95% CI: `r round(cox_results$conf.low[2], 2)`-`r round(cox_results$conf.high[2], 2)`)
+>    - Interpretation: Participants with high physical activity had a `r abs(round((1 - cox_results$estimate[2]) * 100, 0))`% `r ifelse(cox_results$estimate[2] < 1, "lower", "higher")` rate of CVD events compared to those with low physical activity.
+
+> **Model Performance:**
+> - Concordance (C-statistic): `r round(concordance[1], 3)` — indicates the model's ability to discriminate between those who experience events earlier vs. later
+> - The proportional hazards assumption was `r ifelse(ph_test$table["GLOBAL", "p"] > 0.05, "not violated (p > 0.05)", "potentially violated and should be investigated further")`.
+
+***
+
+## Part 3: Comparing Logistic Regression vs. Survival Analysis
+
+```{r compare-methods}
+# Create comparison table
+comparison <- tibble(
+  Aspect = c(
+    "Measure of Association",
+    "Time Consideration",
+    "Handles Censoring",
+    "Assumption",
+    "Best Used When",
+    "Moderate PA Effect",
+    "High PA Effect"
+  ),
+  `Logistic Regression` = c(
+    "Odds Ratio (OR)",
+    "Ignores follow-up time",
+    "No",
+    "Log-odds linear in predictors",
+    "Similar follow-up, rare outcome",
+    paste0("OR = ", round(logit_results$estimate[1], 2)),
+    paste0("OR = ", round(logit_results$estimate[2], 2))
+  ),
+  `Cox Regression` = c(
+    "Hazard Ratio (HR)",
+    "Accounts for time-to-event",
+    "Yes",
+    "Proportional hazards",
+    "Variable follow-up, time matters",
+    paste0("HR = ", round(cox_results$estimate[1], 2)),
+    paste0("HR = ", round(cox_results$estimate[2], 2))
+  )
+)
+
+knitr::kable(comparison, caption = "Comparison of Logistic and Cox Regression")
+```
+
+> **Recommendation for Cohort Studies:** When follow-up time varies between participants or when you want to account for the timing of events, **Cox proportional hazards regression is preferred**. The hazard ratio provides an estimate of the rate ratio, which is often the more relevant measure of effect in epidemiological studies.
+
+***
+
+## Part 4: Writing Up Results (Example Manuscript Text)
+
+Here's how you might write up these results in a manuscript:
+
+### Methods Section Example:
+
+> *"We used Cox proportional hazards regression to estimate hazard ratios (HRs) and 95% confidence intervals (CIs) for the association between physical activity level and incident CVD events. The primary exposure was self-reported leisure-time physical activity, categorized as low (reference), moderate, or high. Models were adjusted for age (continuous), sex, smoking status (never/former/current), BMI (continuous), diabetes, hypertension, and education level. The proportional hazards assumption was assessed using Schoenfeld residuals. All analyses were performed using R version `r R.version.string`."*
+
+### Results Section Example:
+
+> *"During `r format(round(sum(cardiac_surv$time), 0), big.mark=",")` person-years of follow-up (mean `r round(mean(cardiac_surv$time), 1)` years), `r sum(cardiac_surv$event)` participants experienced a CVD event. Compared to participants with low physical activity, those with moderate physical activity had an adjusted HR of `r round(cox_results$estimate[1], 2)` (95% CI: `r round(cox_results$conf.low[1], 2)`-`r round(cox_results$conf.high[1], 2)`), and those with high physical activity had an adjusted HR of `r round(cox_results$estimate[2], 2)` (95% CI: `r round(cox_results$conf.low[2], 2)`-`r round(cox_results$conf.high[2], 2)`). The proportional hazards assumption was not violated (global test p = `r round(ph_test$table["GLOBAL", "p"], 3)`)."*
+
+***
+
+## Exercise 6: Analysis Practice (10 minutes) {.exercise}
+
+Using the analysis dataset, try the following:
+
+1. Fit a Cox model with **statin use** as the exposure and **CVD event** as the outcome
+2. What confounders would you adjust for? (Hint: think about confounding by indication)
+3. Interpret the hazard ratio for statin use
+
+```{r exercise6-solution, eval=FALSE, class.source = 'fold-hide'}
+# Solution
+
+# 1. Fit Cox model
+cox_statin <- coxph(
+  Surv(follow_up_years, cvd_event) ~ statin_use + age + sex +
+    diabetes + hypertension + cholesterol_total + bmi,
+  data = cardiac_final
+)
+
+# Summary
+summary(cox_statin)
+
+# Hazard ratio table
+tbl_regression(cox_statin, exponentiate = TRUE)
+
+# 2. Important confounders for statin use:
+# - Age (older people more likely to use statins)
+# - Diabetes (indication for statin)
+# - Hypertension (often co-managed)
+# - Baseline cholesterol (key indication)
+# - BMI (associated with dyslipidemia)
+
+# 3. Interpretation challenges:
+# Statin use is subject to "confounding by indication" - people on statins
+# are prescribed them BECAUSE they are at higher CVD risk. This can make
+# statins appear harmful if not properly adjusted. This is why observational
+# studies of medications are challenging and RCTs are preferred.
+```
+
+***
+
+# Summary and Key Takeaways
+
+## The Complete Workflow: From Data to Results
+
+```
+1. DEFINE -----> Variables, roles, and relationships (before looking at data!)
+      |
+      v
+2. PLAN ------> Write a Statistical Analysis Plan
+      |
+      v
+3. INSPECT ---> Get to know your data (dimensions, types, summaries)
+      |
+      v
+4. CLEAN -----> Handle duplicates, standardize, validate ranges
+      |
+      v
+5. EXPLORE ---> Univariate and bivariate analysis, Table 1
+      |
+      v
+6. MISSING ---> Assess patterns, decide on approach
+      |
+      v
+7. RECODE ----> Create derived variables, apply criteria
+      |
+      v
+8. DOCUMENT --> Data dictionary, cleaning log
+      |
+      v
+9. SAVE ------> Analysis-ready dataset
+      |
+      v
+10. ANALYZE --> Fit models, check assumptions
+      |
+      v
+11. INTERPRET > Write up results in context
+```
+
+## Key Statistical Concepts Covered
+
+| Analysis | Measure | When to Use | Key Assumption |
+|----------|---------|-------------|----------------|
+| Logistic Regression | Odds Ratio (OR) | Binary outcome, similar follow-up | Log-odds linear |
+| Cox Regression | Hazard Ratio (HR) | Time-to-event, variable follow-up | Proportional hazards |
+
+## Interpretation Checklist for Cohort Studies
+
+- [ ] Report the study design (prospective cohort)
+- [ ] State the total sample size and follow-up time (person-years)
+- [ ] Report the number of events
+- [ ] Present both crude and adjusted estimates
+- [ ] List all confounders adjusted for
+- [ ] Report effect estimates with 95% confidence intervals
+- [ ] State whether assumptions were tested (PH assumption for Cox)
+- [ ] Discuss clinical/public health significance, not just statistical significance
+
+## Best Practices Checklist
+
+- [ ] Research question drives variable definitions, not the data
+- [ ] Write a SAP before extensive analysis
+- [ ] Check for duplicates and impossible values
+- [ ] Standardize categorical variable coding
+- [ ] Document every cleaning step
+- [ ] Assess missing data patterns before deciding approach
+- [ ] Create a data dictionary
+- [ ] Save both .rds (for R) and .csv (for sharing)
+- [ ] Check model assumptions before interpreting results
+- [ ] Consider both statistical and clinical significance
+
+## Resources for Further Learning
+
+**Books:**
+
+- Harrell, F. *Regression Modeling Strategies* (Chapters on logistic and survival)
+- Kleinbaum, D. & Klein, M. *Survival Analysis: A Self-Learning Text*
+- Rothman, K. *Modern Epidemiology* (Cohort study design)
+- van Buuren, S. *Flexible Imputation of Missing Data*
+
+**R Packages Documentation:**
+
+- [`survival`](https://cran.r-project.org/web/packages/survival/) - Survival Analysis
+- [`survminer`](https://rpkgs.datanovia.com/survminer/) - Survival Visualization
+- [`mice`](https://amices.org/mice/) - Multiple Imputation
+- [`gtsummary`](https://www.danieldsjoberg.com/gtsummary/) - Summary Tables
+
+**Online Resources:**
+
+- [R for Data Science](https://r4ds.hadley.nz/) - Data transformation chapters
+- [Missing Data in R](https://stefvanbuuren.name/fimd/) - Free online book
+- [Survival Analysis in R](https://www.emilyzabor.com/tutorials/survival_analysis_in_r_tutorial.html) - Tutorial
+
+***
+
+# Q&A Session {.unnumbered}
+
+**Time for questions!**
+
+Common topics:
+
+- Handling specific data quality issues
+- Choosing between imputation approaches
+- Software-specific questions
+- Applying concepts to your own research
+
+***
+
+*Thank you for attending!*
+
+*Contact: qiaosen.chen@ki.se*
+
+***
+
+# Appendix: Complete R Code {.appendix}
+
+For convenience, here's all the code in one block:
+
+```{r all-code, eval=FALSE, code=readLines(knitr::current_input())}
+```
+
+***
+
+**Session Info:**
+
+```{r session-info}
+sessionInfo()
+```

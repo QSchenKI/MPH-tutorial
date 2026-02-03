@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/
+
+# renv library cache (lockfile is tracked)
+renv/library/
+renv/staging/
+
+# Generated data
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Generated outputs
+output/figures/*
+output/tables/*
+!output/figures/.gitkeep
+!output/tables/.gitkeep
+
+# Generated docs
+docs/data_cleaning_log.csv
+
+# Rendered tutorial outputs
+workshop_tutorial.html
+workshop_tutorial_files/
