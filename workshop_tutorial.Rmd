@@ -437,12 +437,12 @@ EXCLUSION CRITERIA:
 PRIMARY ANALYSIS:
 Cox proportional hazards regression with time to first CVD event
 as the outcome and physical activity (3 levels) as the exposure,
-adjusted for age, sex, smoking status, BMI, diabetes, and hypertension.
+adjusted for age, sex, smoking status, education, BMI, diabetes,
+and hypertension.
 
 SECONDARY ANALYSES:
 1. Logistic regression (ignoring time-to-event)
-2. Stratified analyses by sex
-3. Sensitivity analysis with complete cases only
+2. Sensitivity analysis with complete cases only
 ```
 
 ### 5. Missing Data Strategy
@@ -920,143 +920,7 @@ cor(cardiac_clean$sbp, cardiac_clean$dbp, use = "complete.obs")
 
 ***
 
-# Handling Missing Data
-
-## Understanding Missing Data Mechanisms
-
-| Mechanism | Definition | Example | Impact |
-|-----------|------------|---------|--------|
-| **MCAR** | Missing Completely at Random | Lab sample accidentally dropped | Unbiased but reduced power |
-| **MAR** | Missing at Random (given observed data) | Older patients less likely to have recent BP | Biased if ignored, can impute |
-| **MNAR** | Missing Not at Random | Sicker patients miss follow-up | Biased even with imputation |
-
-## Assess Missing Data Patterns
-
-```{r missing-overview}
-# Overall missing data summary
-cardiac_clean %>%
-  miss_var_summary() %>%
-  filter(pct_miss > 0) %>%
-  knitr::kable(caption = "Variables with Missing Data", digits = 1)
-```
-
-```{r missing-visualization, fig.height=4}
-# Visualize missing data patterns
-vis_miss(cardiac_clean, sort_miss = TRUE)
-```
-
-```{r missing-upset, fig.height=6}
-# Missing data patterns (co-occurrence)
-gg_miss_upset(cardiac_clean, nsets = 6)
-```
-
-## Is Missingness Related to Other Variables?
-
-```{r missing-patterns}
-# Check if missingness in physical_activity is related to other variables
-cardiac_clean %>%
-  mutate(pa_missing = is.na(physical_activity)) %>%
-  group_by(pa_missing) %>%
-  summarise(
-    mean_age = mean(age, na.rm = TRUE),
-    prop_male = mean(sex == "Male", na.rm = TRUE),
-    prop_cvd = mean(cvd_event, na.rm = TRUE)
-  ) %>%
-  knitr::kable(caption = "Characteristics by Physical Activity Missingness", digits = 3)
-```
-
-## Handling Missing Data: Common Approaches
-
-### 1. Complete Case Analysis
-
-```{r complete-case}
-# Create complete case dataset
-cardiac_complete <- cardiac_clean %>%
-  drop_na(cvd_event, physical_activity, age, sex, smoking_status,
-          bmi, diabetes, hypertension)
-
-cat("Original N:", nrow(cardiac_clean), "\n")
-cat("Complete cases N:", nrow(cardiac_complete), "\n")
-cat("Proportion retained:", round(nrow(cardiac_complete)/nrow(cardiac_clean)*100, 1), "%\n")
-```
-
-**Problem:** We may lose a lot of data, and results may be biased if data is not MCAR.
-
-### 2. Multiple Imputation
-
-Multiple imputation is the gold standard for handling MAR data:
-
-```{r mice-imputation, cache=TRUE}
-# Select variables for imputation
-vars_to_impute <- c("age", "sex", "smoking_status", "physical_activity",
-                    "education", "sbp", "dbp", "bmi", "cholesterol_total",
-                    "diabetes", "hypertension", "cvd_event", "follow_up_years")
-
-cardiac_for_imp <- cardiac_clean %>%
-  select(patient_id, all_of(vars_to_impute))
-
-# Set up MICE (this may take a minute)
-# Using m=5 imputations for demonstration (use m=20+ in practice)
-set.seed(2026)
-imp <- mice(
-  cardiac_for_imp %>% select(-patient_id),
-  m = 5,          # Number of imputations
-  method = "pmm", # Predictive mean matching for continuous
-  maxit = 10,     # Number of iterations
-  printFlag = FALSE
-)
-
-# Check convergence
-plot(imp)
-```
-
-```{r mice-summary}
-# Summary of imputation
-summary(imp)
-
-# Get one imputed dataset (for exploration)
-cardiac_imputed <- complete(imp, action = 1)
-
-# Compare distributions before and after imputation
-cat("Physical Activity - Original:\n")
-table(cardiac_clean$physical_activity, useNA = "ifany")
-
-cat("\nPhysical Activity - After Imputation:\n")
-table(cardiac_imputed$physical_activity, useNA = "ifany")
-```
-
-> **Note for this workshop:** In a real analysis, you would run your regression models on each imputed dataset and pool the results using `mice::pool()`. For this workshop, we proceed with complete case analysis to keep the modeling sections straightforward. The MICE section above demonstrates the *technique* — applying it to the final models is a natural next step.
-
-## Exercise 5: Missing Data Assessment (10 minutes) {.exercise}
-
-1. Calculate the percentage of missing data for the `education` variable
-2. Check if missingness in `education` is related to `age` or `sex`
-3. What mechanism (MCAR, MAR, MNAR) do you suspect? Why?
-
-```{r exercise5-solution, eval=FALSE, class.source = 'fold-hide'}
-# 1. Missing percentage
-mean(is.na(cardiac_clean$education)) * 100
-
-# 2. Relationship with other variables
-cardiac_clean %>%
-  mutate(edu_missing = is.na(education)) %>%
-  group_by(edu_missing) %>%
-  summarise(
-    mean_age = mean(age, na.rm = TRUE),
-    prop_male = mean(sex == "Male", na.rm = TRUE),
-    n = n()
-  )
-
-# 3. Interpretation:
-# If missing education is associated with age/sex, it suggests MAR
-# (missingness can be predicted from observed variables)
-# If there's no association, it might be MCAR
-# MNAR would be if people with lower education are less likely to report it
-# (which we can't test directly from the data)
-```
-
-***
-# Recoding Variables and Preparing the Analysis Dataset
+# Recoding Variables and Applying Eligibility Criteria
 
 ## Common Recoding Tasks
 
@@ -1133,6 +997,256 @@ cat("After excluding missing outcome:", nrow(cardiac_analysis),
 # Final sample
 cat("\nFinal analytic sample:", nrow(cardiac_analysis), "\n")
 ```
+
+***
+
+# Handling Missing Data
+
+## Understanding Missing Data Mechanisms
+
+| Mechanism | Definition | Example | Impact |
+|-----------|------------|---------|--------|
+| **MCAR** | Missing Completely at Random | Lab sample accidentally dropped | Unbiased but reduced power |
+| **MAR** | Missing at Random (given observed data) | Older patients less likely to have recent BP | Biased if ignored, can impute |
+| **MNAR** | Missing Not at Random | Sicker patients miss follow-up | Biased even with imputation |
+
+## Assess Missing Data Patterns
+
+```{r missing-overview}
+# Overall missing data summary
+cardiac_analysis %>%
+  miss_var_summary() %>%
+  filter(pct_miss > 0) %>%
+  knitr::kable(caption = "Variables with Missing Data", digits = 1)
+```
+
+```{r missing-visualization, fig.height=4}
+# Visualize missing data patterns
+vis_miss(cardiac_analysis, sort_miss = TRUE)
+```
+
+```{r missing-upset, fig.height=6}
+# Missing data patterns (co-occurrence)
+gg_miss_upset(cardiac_analysis, nsets = 6)
+```
+
+## Is Missingness Related to Other Variables?
+
+```{r missing-patterns}
+# Check if missingness in education is related to other variables
+cardiac_analysis %>%
+  mutate(edu_missing = is.na(education)) %>%
+  group_by(edu_missing) %>%
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    prop_male = mean(sex == "Male", na.rm = TRUE),
+    prop_cvd = mean(cvd_event, na.rm = TRUE)
+  ) %>%
+  knitr::kable(caption = "Characteristics by Education Missingness", digits = 3)
+```
+
+## Handling Missing Data: Common Approaches
+
+### 1. Complete Case Analysis
+
+```{r complete-case}
+# Create complete case dataset
+cardiac_complete <- cardiac_analysis %>%
+  drop_na(age, sex, smoking_status, bmi, diabetes, hypertension, education)
+
+cat("Eligible sample N:", nrow(cardiac_analysis), "\n")
+cat("Complete cases N:", nrow(cardiac_complete), "\n")
+cat("Proportion retained:", round(nrow(cardiac_complete)/nrow(cardiac_analysis)*100, 1), "%\n")
+```
+
+**Problem:** We may lose a lot of data, and results may be biased if data is not MCAR.
+
+### 2. Multiple Imputation
+
+Multiple imputation is the gold standard for handling MAR data.
+
+> **Why include the outcome in the imputation model?** It may seem
+> counter-intuitive, but `cvd_event` can be included?
+> as predictors when imputing covariates. If the outcome is excluded, the
+> imputation model assumes covariates are independent of the outcome, which
+> attenuates (biases toward zero) the covariate–outcome associations in
+> downstream analyses. Including the outcome might not inflate associations
+> — So in our session, let's preserves them.
+>
+> Variables that are complete after applying eligibility criteria (`age`,
+> `physical_activity`, `cvd_event`) are not imputed (mice skips them
+> automatically) but still serve as predictors for imputing other covariates.
+
+```{r mice-imputation, cache=TRUE}
+# Include all analysis variables: covariates AND outcome.
+# The outcome (cvd_event, follow_up_years) must be in the imputation model so
+# that covariate–outcome associations are preserved (van Buuren, FIMD §6.3).
+# Complete variables (age, physical_activity, cvd_event) are not imputed but
+# serve as predictors for imputing other variables.
+vars_to_impute <- c("age", "sex", "smoking_status", "physical_activity",
+                    "education", "sbp", "dbp", "bmi", "cholesterol_total",
+                    "diabetes", "hypertension", "cvd_event", "follow_up_years")
+
+cardiac_for_imp <- cardiac_analysis %>%
+  select(patient_id, all_of(vars_to_impute))
+
+# Set up MICE (this may take a minute)
+# Using m=5 imputations for demonstration (use m=20+ in practice)
+set.seed(2026)
+imp <- mice(
+  cardiac_for_imp %>% select(-patient_id),
+  m = 5,          # Number of imputations
+  method = "pmm", # Predictive mean matching for continuous
+  maxit = 10,     # Number of iterations
+  printFlag = FALSE
+)
+
+# Check convergence
+plot(imp)
+```
+
+```{r mice-summary}
+# Summary of imputation
+summary(imp)
+
+# Get one imputed dataset (for exploration)
+cardiac_imputed <- complete(imp, action = 1)
+
+# Compare distributions before and after imputation
+cat("Smoking Status - Before Imputation:\n")
+table(cardiac_analysis$smoking_status, useNA = "ifany")
+
+cat("\nSmoking Status - After Imputation:\n")
+table(cardiac_imputed$smoking_status, useNA = "ifany")
+```
+
+> **Wait — did you spot the problem?** Look at the imputation methods in the summary
+> above. Every variable with missing data was imputed using `"pmm"` (predictive mean
+> matching). This is fine for truly continuous variables like `age`, `sbp`, and `bmi`.
+> But there are two issues:
+>
+> 1. **Factor variables treated as continuous.** Look at the `smoking_status`
+>    table: it shows only three categories (Never, Former, Current) after
+>    imputation, which *looks* correct. But under the hood, PMM converted the
+>    factor to its integer codes (1 = Never, 2 = Former, 3 = Current) and fitted
+>    a **linear regression** on those codes. Here is how PMM works step by step:
+>    **(a)** fit a linear model to predict the integer code from other variables —
+>    the predicted values are continuous (e.g., 1.7, 2.3);
+>    **(b)** for each missing value, find the observed cases ("donors") whose
+>    predicted values are closest to the missing case's prediction;
+>    **(c)** randomly draw the donor's **actual observed value** (1, 2, or 3) as
+>    the imputed value. Step (c) is why the output always contains valid factor
+>    levels — you never see 1.7 in the result. But the problem lies in steps
+>    (a) and (b): the linear model assumes equal spacing and a meaningful numeric
+>    ordering between levels. For `smoking_status` (Never/Former/Current) there
+>    is no natural order at all, yet PMM treats "Former" as numerically between
+>    "Never" and "Current." The same issue applies to `education` and any other
+>    multi-level factor. Because predicted means tend toward the centre of the
+>    integer range, donor matching systematically favours middle categories,
+>    distorting the imputed distribution. Multi-level factors should be imputed
+>    with **`"polyreg"`** (polytomous logistic regression), which models each
+>    category's probability directly without assuming any ordering.
+>
+> 2. **Binary numeric variables modelled incorrectly.** The same mechanism applies
+>    to `diabetes` and `hypertension` (binary 0/1, stored as numeric). The output
+>    is always 0 or 1 (step c), but the linear model in step (a) can predict values
+>    like −0.2 or 1.4, distorting donor matching. **`"logreg"`** (logistic regression)
+>    properly models the probability of each outcome.
+>
+> Let's fix both problems.
+
+```{r mice-inspect-methods}
+# Instead of setting a single global method, let mice auto-detect defaults
+imp_data <- cardiac_for_imp %>% select(-patient_id)
+init <- mice(imp_data, maxit = 0, printFlag = FALSE)
+
+# Inspect the default methods mice assigns based on variable type
+cat("Default methods assigned by mice:\n")
+print(init$method)
+```
+
+> Without the global `method = "pmm"` override, `mice` auto-detects variable types
+> and assigns appropriate methods to factors. However, `diabetes` and `hypertension`
+> **still get `"pmm"`** because they are stored as numeric 0/1, not as factors. We
+> need to manually override these two.
+
+```{r mice-imputation-correct, cache=TRUE}
+# Extract the default method vector and fix binary numeric variables
+meth <- init$method
+
+# Override: use logistic regression for binary numeric variables
+meth["diabetes"] <- "logreg"
+meth["hypertension"] <- "logreg"
+
+cat("Corrected imputation methods:\n")
+print(meth)
+
+# Run MICE with corrected, variable-specific methods
+set.seed(2026)
+imp <- mice(
+  imp_data,
+  m = 5,           # Number of imputations
+  method = meth,   # Variable-specific methods
+  maxit = 10,      # Number of iterations
+  printFlag = FALSE
+)
+
+# Check convergence
+plot(imp)
+```
+
+```{r mice-summary-correct}
+# Verify the corrected imputation — methods should now be variable-specific
+summary(imp)
+
+# Get one imputed dataset
+cardiac_imputed <- complete(imp, action = 1)
+
+# Sanity check: the outputs below look similar to the PMM version (both produce
+# valid values), but the underlying models are now appropriate for each variable type.
+cat("Diabetes (logreg):\n")
+table(cardiac_imputed$diabetes, useNA = "ifany")
+
+cat("\nHypertension (logreg):\n")
+table(cardiac_imputed$hypertension, useNA = "ifany")
+
+cat("\nSmoking Status (polyreg):\n")
+table(cardiac_imputed$smoking_status, useNA = "ifany")
+```
+
+> **Note for this workshop:** In a real analysis, you would run your regression models on each imputed dataset and pool the results using `mice::pool()`. For this workshop, we proceed with complete case analysis to keep the modeling sections straightforward. The MICE section above demonstrates the *technique* — applying it to the final models is a natural next step.
+
+## Exercise 5: Missing Data Assessment (10 minutes) {.exercise}
+
+1. Calculate the percentage of missing data for the `education` variable
+2. Check if missingness in `education` is related to `age` or `sex`
+3. What mechanism (MCAR, MAR, MNAR) do you suspect? Why?
+
+```{r exercise5-solution, eval=FALSE, class.source = 'fold-hide'}
+# 1. Missing percentage
+mean(is.na(cardiac_analysis$education)) * 100
+
+# 2. Relationship with other variables
+cardiac_analysis %>%
+  mutate(edu_missing = is.na(education)) %>%
+  group_by(edu_missing) %>%
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    prop_male = mean(sex == "Male", na.rm = TRUE),
+    n = n()
+  )
+
+# 3. Interpretation:
+# If missing education is associated with age/sex, it suggests MAR
+# (missingness can be predicted from observed variables)
+# If there's no association, it might be MCAR
+# MNAR would be if people with lower education are less likely to report it
+# (which we can't test directly from the data)
+```
+
+***
+
+# Preparing the Final Analysis Dataset
 
 ## Create the Final Analysis Dataset
 
@@ -1806,10 +1920,10 @@ tbl_regression(cox_statin, exponentiate = TRUE)
 5. EXPLORE ---> Univariate and bivariate analysis, Table 1
       |
       v
-6. MISSING ---> Assess patterns, decide on approach
+6. RECODE ----> Create derived variables, apply eligibility criteria
       |
       v
-7. RECODE ----> Create derived variables, apply criteria
+7. MISSING ---> Assess patterns, impute covariates (on eligible sample)
       |
       v
 8. DOCUMENT --> Data dictionary, cleaning log
