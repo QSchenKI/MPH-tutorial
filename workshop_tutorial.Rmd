@@ -1,7 +1,7 @@
 ---
 title: "Workshop: The First Steps After Receiving a Dataset"
 subtitle: "From Raw Data to Analysis-Ready Dataset"
-author: "Qiao Sen Chen, PhD Student, MEB, Karolinska Institutet"
+author: "Qiao Sen Chen, PhD Student, MedS, Karolinska Institutet"
 date: "February 5, 2026"
 output:
   html_document:
@@ -392,7 +392,7 @@ A **Statistical Analysis Plan** is a document that pre-specifies:
 - Handling of missing data
 - Sensitivity analyses
 
-> **Why pre-specify?** To avoid p-hacking, cherry-picking results, and post-hoc rationalization. It's increasingly required by journals and registers (e.g., ClinicalTrials.gov).
+> **Why pre-specify?** To avoid p-hacking, cherry-picking results, and post-hoc rationalization. It's increasingly required by journals nowsaday.
 
 ## Key Components of a SAP
 

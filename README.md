@@ -1,6 +1,6 @@
 # Workshop: The First Steps After Receiving a Dataset
 
-**Author:** Qiao Sen Chen, PhD Student, MEB, Karolinska Institutet
+**Author:** Qiao Sen Chen, PhD Student, MedS, Karolinska Institutet
 **Date:** February 5, 2026
 **Duration:** 3 hours (13:00-16:00)
 
